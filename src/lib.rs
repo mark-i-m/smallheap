@@ -38,8 +38,8 @@ const DEBUG: bool = true;
 #[cfg(not(feature = "debug"))]
 const DEBUG: bool = false;
 
-/// A const representing the minimum alignment of any block.
-const BLOCK_ALIGN: usize = size_of::<usize>();
+/// A const representing the minimum alignment of any block. Should be a power of two.
+const BLOCK_ALIGN: usize = 4 * size_of::<usize>();
 
 // A couple of utilities
 
@@ -87,12 +87,15 @@ pub struct KernelHeap {
 impl KernelHeap {
     /// Create a new heap starting at address `start` with the given `size` in bytes.
     pub unsafe fn new(start: *mut u8, size: usize) -> Self {
-        // Round up to nearest multiple of 16
-        let start = start as usize;
-        let start = round_to_block_align(start);
+        #[cfg(feature = "debug")]
+        println!("heap::new({:p}, {})", start, size);
 
-        // round self.end down
-        let end = (start + size) & !0xF;
+        // Block align the beginning
+        let original_start = start as usize;
+        let start = round_to_block_align(original_start);
+
+        // round end down
+        let end = (original_start + size) & !(BLOCK_ALIGN - 1);
 
         // bounds check
         if end <= start {
@@ -710,5 +713,51 @@ impl Block {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use std::mem;
+
+    #[derive(Clone, Copy)]
+    #[cfg_attr(target_pointer_width = "64", repr(align(32)))]
+    #[cfg_attr(target_pointer_width = "32", repr(align(16)))]
+    struct BlockAligned([usize; 4]);
+
+    macro_rules! new_block_aligned {
+        ($size:expr) => {
+            [BlockAligned([0; 4]); $size / BLOCK_ALIGN]
+        }
+    }
+
+    #[test]
+    fn test_block_align() {
+        assert!(BLOCK_ALIGN.is_power_of_two());
+    }
+
+    #[test]
+    fn test_init_aligned() {
+        const SIZE: usize = 1 << 12;
+        let mut mem = new_block_aligned!(SIZE);
+
+        assert_eq!(SIZE, mem.len() * mem::size_of::<BlockAligned>());
+
+        let h = unsafe { KernelHeap::new(mem.as_mut_ptr() as *mut u8, SIZE) };
+
+        // make sure we don't consume more space than we are given
+        assert!(h.start >= (mem.as_mut_ptr() as usize));
+        assert!(h.end <= unsafe { (mem.as_mut_ptr().offset(SIZE as isize) as usize) });
+
+        // make sure we are not wasting too much space
+        assert_eq!(h.size(), SIZE);
+        assert_eq!(h.free_bytes(), h.size());
+    }
+
+    #[test]
+    fn test_init_not_aligned() {
+        unimplemented!();
     }
 }
