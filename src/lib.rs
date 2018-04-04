@@ -228,7 +228,7 @@ impl KernelHeap {
         let mut block = Block::from_raw_parts(ptr, old_size);
 
         // update heap metadata
-        self.free_bytes += block.get_size();
+        self.free_bytes += old_size;
 
         // sanity
         if block.is_free() {
