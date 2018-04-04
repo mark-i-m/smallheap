@@ -1,28 +1,54 @@
-//! This file contains the memory allocator used by the kernel.
+//! A simple, lightweight, space-efficient heap allocator.
 //!
-//! The implementation in this file is a simple first-fit allocator. Most of the code is not
-//! thread-safe, but the `KernelAllocator` type which implements `Alloc` is.
+//! This is a straight-forward, no-frills allocator. It uses a first-fit policy.
 //!
-//! Invariants:
-//! * BLOCK_ALIGN = 4*size_of::<usize>()
-//! * All blocks will be a multiple of BLOCK_ALIGN
-//! * All blocks will be BLOCK_ALIGN-aligned
+//! ### Features
 //!
-//! Block structure:
-//! * size
-//! * forward pointer | free bits
-//! * backward pointer | 0x0
-//!   ...
-//! * size (last word)
+//! - O(1) space overhead. Really, it is at most a few dozen bytes. There is exactly 0 space
+//!   overhead per allocation, though.
+//! - `no_std` compatible
 //!
-//! When a block is free, the first and last words should match and be equal to the size of the
-//! block. The forward pointer points to the head of the next free block. The backward pointer
-//! points to the head of the previous free block. Since all blocks are at least 16B aligned, at
-//! least the last 4 bits of all block addresses are 0. The last 4 bits of the forward pointer
-//! should be all 1s if the block is free.
+//! ### Caveats
 //!
-//! When a block is in use, the whole block is usable for the user. Thus, usable size and block
-//! size are equal.
+//! - The allocator is not thread-safe. If you need thread-safety, you should wrap the heap in a
+//!   `Mutex` or something.
+//! - The allocator does not do too much to prevent fragmentation. This is OK if you expect to
+//!   keep allocating and deallocating chunks of the same size. Allocation may try to coalesce
+//!   previously freed blocks, but there is a configurable limit to how much it tries to do this
+//!   so that we can guarantee bounded time for allocation. Freeing a block never coallesces.
+//! - Only works on architectures with pointer widths >= 32 bits.
+//! - Does no sanity checking on `free`'s arguments. The use is entirely responsible for passing
+//!   the correct arguments to `free`. This is reasonably easy if you are using it as a global
+//!   allocator because the compiler does that for you :)
+//!
+//! ### Usage
+//!
+//! If you intend to use this as a global allocator, you can easily wrap this with `liballoc`'s
+//! `heap::allocator` API. Otherwise, you can just instantiate a `smallheap::Allocator` singleton
+//! object with some memory and use that.
+
+// The implementation in this file is a simple first-fit allocator.
+//
+// Invariants:
+// * BLOCK_ALIGN = 4*size_of::<usize>()
+// * All blocks will be a multiple of BLOCK_ALIGN in size
+// * All blocks will be BLOCK_ALIGN-aligned
+//
+// Block structure:
+// * Word 0:   size
+// * Word 1:   forward pointer | free bits
+// * Word 2:   backward pointer | 0x0
+//   ...
+// * Word N-1: size (last word)
+//
+// When a block is free, the first and last words should match and be equal to the size of the
+// block. The forward pointer points to the head of the next free block. The backward pointer
+// points to the head of the previous free block. Since all blocks are at least 16B aligned, at
+// least the last 4 bits of all block addresses are 0. The last 4 bits of the forward pointer
+// should be all 1s if the block is free.
+//
+// When a block is in use, the whole block is usable for the user. Thus, usable size and block
+// size are equal.
 
 extern crate core;
 
@@ -57,14 +83,14 @@ fn round_to_n(size: usize, n: usize) -> usize {
     }
 }
 
-// The kernel allocator implementation...
+// The allocator implementation...
 
 /// The heap implementation itself.
-pub struct KernelHeap {
-    /// The start address of the kernel heap
+pub struct Allocator {
+    /// The start address of the heap
     start: usize,
 
-    /// The end address of the kernel heap. That is, the first address that is not in the heap.
+    /// The end address of the heap. That is, the first address that is not in the heap.
     end: usize,
 
     /// The first block of the heap
@@ -84,7 +110,7 @@ pub struct KernelHeap {
     frees: usize,
 }
 
-impl KernelHeap {
+impl Allocator {
     /// Create a new heap starting at address `start` with the given `size` in bytes.
     pub unsafe fn new(start: *mut u8, size: usize) -> Self {
         #[cfg(feature = "debug")]
@@ -117,7 +143,7 @@ impl KernelHeap {
             end - start
         );
 
-        KernelHeap {
+        Allocator {
             start,
             end,
             free_list: Some(first),
@@ -743,7 +769,7 @@ mod test {
 
         assert_eq!(SIZE, mem.len() * mem::size_of::<BlockAligned>());
 
-        let h = unsafe { KernelHeap::new(mem.as_mut_ptr() as *mut u8, SIZE) };
+        let h = unsafe { Allocator::new(mem.as_mut_ptr() as *mut u8, SIZE) };
 
         // make sure we don't consume more space than we are given
         assert!(h.start >= (mem.as_mut_ptr() as usize));
@@ -766,7 +792,7 @@ mod test {
             &mut mem
         };
 
-        let h = unsafe { KernelHeap::new(mem.as_mut_ptr() as *mut u8, SIZE) };
+        let h = unsafe { Allocator::new(mem.as_mut_ptr() as *mut u8, SIZE) };
 
         // make sure we don't consume more space than we are given
         assert!(h.start >= (mem.as_mut_ptr() as usize));

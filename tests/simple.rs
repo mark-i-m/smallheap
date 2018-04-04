@@ -1,13 +1,13 @@
 extern crate smallheap;
 
-use smallheap::KernelHeap;
+use smallheap::Allocator;
 
 #[test]
 fn test_simple_alloc_free() {
     const SIZE: usize = 1 << 12;
     let mut mem = [0u8; SIZE];
 
-    let mut h = unsafe { KernelHeap::new(mem.as_mut_ptr(), SIZE) };
+    let mut h = unsafe { Allocator::new(mem.as_mut_ptr(), SIZE) };
     let max = h.size();
 
     assert_eq!(h.free_bytes(), h.size());
