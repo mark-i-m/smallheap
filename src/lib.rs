@@ -383,20 +383,20 @@ impl Allocator {
 
 /// A single heap block
 struct Block {
-    data: &'static mut [u32],
+    data: &'static mut [usize],
 }
 
 impl Block {
     /// Construct a `Block` from a pointer to the beginning and the length in bytes.
     pub unsafe fn from_raw_parts(ptr: *mut u8, len: usize) -> Self {
         Block {
-            data: slice::from_raw_parts_mut(ptr as *mut u32, len),
+            data: slice::from_raw_parts_mut(ptr as *mut usize, len),
         }
     }
 
     pub unsafe fn clone_unsafe(&self) -> Self {
         Block {
-            data: slice::from_raw_parts_mut(self.as_ptr() as *mut u32, self.data.len()),
+            data: slice::from_raw_parts_mut(self.as_ptr() as *mut usize, self.data.len()),
         }
     }
 
@@ -422,7 +422,7 @@ impl Block {
 
     /// Sets the header to the given value
     fn set_head(&mut self, head: usize) {
-        self.data[0] = head as u32;
+        self.data[0] = head;
     }
 
     /// Returns the last word of the block, which will contain the size if this is a free block
@@ -432,7 +432,7 @@ impl Block {
 
     /// Sets the footer to the given value
     fn set_foot(&mut self, foot: usize) {
-        *self.data.last_mut().unwrap() = foot as u32;
+        *self.data.last_mut().unwrap() = foot;
     }
 
     /// Gets the 4 free bits of the block
@@ -442,9 +442,9 @@ impl Block {
 
     /// Set the forward pointer (but not the free bits)
     pub fn set_next(&mut self, next: Option<&Block>) {
-        let free_bits = self.get_free_bits() as u32;
+        let free_bits = self.get_free_bits() as usize;
         self.data[1] = if let Some(next) = next {
-            ((next.as_ptr() as u32) & !0xF) | free_bits
+            ((next.as_ptr() as usize) & !0xF) | free_bits
         } else {
             free_bits
         };
@@ -453,7 +453,7 @@ impl Block {
     /// Set the backward pointer
     pub fn set_prev(&mut self, prev: Option<&Block>) {
         self.data[2] = if let Some(prev) = prev {
-            (prev.as_ptr() as u32) & !0xF
+            (prev.as_ptr() as usize) & !0xF
         } else {
             0
         };
@@ -669,7 +669,7 @@ impl Block {
 
         // Extend the block
         let new_size = self.get_size() + next.get_size();
-        let new_data = slice::from_raw_parts_mut(self.as_mut_ptr() as *mut u32, new_size);
+        let new_data = slice::from_raw_parts_mut(self.as_mut_ptr() as *mut usize, new_size);
         let old_data = mem::replace(&mut self.data, new_data);
         mem::forget(old_data);
         self.set_size(new_size);
@@ -708,7 +708,7 @@ impl Block {
         let new_block_size = old_size - size;
 
         // make this block smaller
-        let new_data = unsafe { slice::from_raw_parts_mut(self.as_mut_ptr() as *mut u32, size) };
+        let new_data = unsafe { slice::from_raw_parts_mut(self.as_mut_ptr() as *mut usize, size) };
         let old_data = mem::replace(&mut self.data, new_data);
         mem::forget(old_data);
         self.set_size(size);
