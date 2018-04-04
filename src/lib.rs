@@ -314,22 +314,20 @@ impl KernelHeap {
     /// These statistics may be inconsistent if other threads use the allocator during the call.
     #[cfg(feature = "debug")]
     fn print_stats(&self) {
-        unsafe {
-            println!("\nHeap stats\n----------\n");
+        println!("\nHeap stats\n----------\n");
 
-            // Number of free blocks and amount of free memory
-            let (num_free, size_free, size_used) = self.get_block_stats();
-            println!(
-                "{} free blocks; {} bytes free, {} bytes used\n",
-                num_free, size_free, size_used
-            );
+        // Number of free blocks and amount of free memory
+        let (num_free, size_free, size_used) = self.get_block_stats();
+        println!(
+            "{} free blocks; {} bytes free, {} bytes used\n",
+            num_free, size_free, size_used
+        );
 
-            // Number of mallocs and frees
-            println!(
-                "Successfull mallocs: {}; Failed mallocs: {}; Frees: {}\n\n",
-                self.success_mallocs, self.fail_mallocs, self.frees
-            );
-        }
+        // Number of mallocs and frees
+        println!(
+            "Successfull mallocs: {}; Failed mallocs: {}; Frees: {}\n\n",
+            self.success_mallocs, self.fail_mallocs, self.frees
+        );
     }
 
     /// Helper method to compute stats
@@ -758,6 +756,34 @@ mod test {
 
     #[test]
     fn test_init_not_aligned() {
-        unimplemented!();
+        const SIZE: usize = 1 << 12;
+        let mut mem = [0u8; SIZE];
+
+        // make sure we have unaligned memory
+        let mem = if mem.as_mut_ptr() as usize % BLOCK_ALIGN == 0 {
+            &mut mem[1..]
+        } else {
+            &mut mem
+        };
+
+        let h = unsafe { KernelHeap::new(mem.as_mut_ptr() as *mut u8, SIZE) };
+
+        // make sure we don't consume more space than we are given
+        assert!(h.start >= (mem.as_mut_ptr() as usize));
+        assert!(h.end <= unsafe { (mem.as_mut_ptr().offset(SIZE as isize) as usize) });
+
+        // make sure we are not wasting too much space
+        let actual_start = {
+            let start = mem.as_mut_ptr() as usize;
+            start - (start % BLOCK_ALIGN) + BLOCK_ALIGN
+        };
+        let actual_end = {
+            let end = unsafe { mem.as_mut_ptr().offset(SIZE as isize) as usize };
+            end - (end % BLOCK_ALIGN)
+        };
+        assert_eq!(h.start, actual_start);
+        assert_eq!(h.end, actual_end);
+        assert_eq!(h.size(), actual_end - actual_start);
+        assert_eq!(h.free_bytes(), h.size());
     }
 }
