@@ -50,7 +50,7 @@
 // When a block is in use, the whole block is usable for the user. Thus, usable size and block
 // size are equal.
 
-#[cfg_attr(feature = "no_std", no_std)]
+#![cfg_attr(feature = "no_std", no_std)]
 
 #[cfg(not(feature = "no_std"))]
 extern crate core;
