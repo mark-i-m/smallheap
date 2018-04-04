@@ -10,7 +10,7 @@ NOTE: I haven't extensively tested this yet... feel free to file issues.
 
 - O(1) space overhead. Really, it is at most a few dozen bytes. There is exactly 0 space
   overhead per allocation, though.
-- `no_std` compatible
+- `no_std` compatible. Use the `no_std` feature in your `Cargo.toml`.
 
 ### Caveats
 

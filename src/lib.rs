@@ -6,7 +6,7 @@
 //!
 //! - O(1) space overhead. Really, it is at most a few dozen bytes. There is exactly 0 space
 //!   overhead per allocation, though.
-//! - `no_std` compatible
+//! - `no_std` compatible. Use the `no_std` feature in your `Cargo.toml`.
 //!
 //! ### Caveats
 //!
@@ -50,6 +50,9 @@
 // When a block is in use, the whole block is usable for the user. Thus, usable size and block
 // size are equal.
 
+#[cfg_attr(feature = "no_std", no_std)]
+
+#[cfg(not(feature = "no_std"))]
 extern crate core;
 
 use core::{ptr, slice, mem::{self, size_of}};
