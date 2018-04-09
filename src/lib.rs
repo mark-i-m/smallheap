@@ -67,8 +67,11 @@ const DEBUG: bool = true;
 #[cfg(not(feature = "debug"))]
 const DEBUG: bool = false;
 
+/// The size of a word (convenience)
+const WORD_SIZE: usize = size_of::<usize>();
+
 /// A const representing the minimum alignment of any block. Should be a power of two.
-const BLOCK_ALIGN: usize = 4 * size_of::<usize>();
+const BLOCK_ALIGN: usize = 4 * WORD_SIZE;
 
 // A couple of utilities
 
@@ -130,6 +133,8 @@ impl Allocator {
         if end <= start {
             panic!("No heap space");
         }
+
+        assert!((end - start) % BLOCK_ALIGN == 0);
 
         // create first block and free list
         let mut first = Block::from_raw_parts(start as *mut u8, end - start);
@@ -219,8 +224,8 @@ impl Allocator {
         begin.mark_used();
 
         // mess up metadata so as to make life easier later
-        begin.set_foot(0xFFFFFFFF);
-        begin.set_head(0xFFFFFFFF);
+        begin.set_foot(!0);
+        begin.set_head(!0);
 
         // update stats
         self.success_mallocs += 1;
@@ -277,6 +282,7 @@ impl Allocator {
 
     /// Return the number of bytes of this heap.
     pub fn size(&self) -> usize {
+        println!("size: {:x} {:x}", self.start, self.end);
         self.end - self.start
     }
 
@@ -390,13 +396,16 @@ impl Block {
     /// Construct a `Block` from a pointer to the beginning and the length in bytes.
     pub unsafe fn from_raw_parts(ptr: *mut u8, len: usize) -> Self {
         Block {
-            data: slice::from_raw_parts_mut(ptr as *mut usize, len),
+            // NOTE: this is a `usize` array, so divide length by words size!
+            data: slice::from_raw_parts_mut(ptr as *mut usize, len / WORD_SIZE),
         }
     }
 
+    /// Unsafely make a clone of this `Block`. This is like creating an aliasing pointer, so be
+    /// very very careful about what you do with the clone!
     pub unsafe fn clone_unsafe(&self) -> Self {
         Block {
-            data: slice::from_raw_parts_mut(self.as_ptr() as *mut usize, self.data.len()),
+            data: slice::from_raw_parts_mut(self.data.as_ptr() as *mut _, self.data.len()),
         }
     }
 
@@ -669,7 +678,9 @@ impl Block {
 
         // Extend the block
         let new_size = self.get_size() + next.get_size();
-        let new_data = slice::from_raw_parts_mut(self.as_mut_ptr() as *mut usize, new_size);
+        // NOTE: this is a `usize` array, so divide length by words size!
+        let new_data =
+            slice::from_raw_parts_mut(self.as_mut_ptr() as *mut usize, new_size / WORD_SIZE);
         let old_data = mem::replace(&mut self.data, new_data);
         mem::forget(old_data);
         self.set_size(new_size);
@@ -682,33 +693,34 @@ impl Block {
     pub fn split(&mut self, size: usize) -> Block {
         // make sure the block is free and valid
         if !self.is_free() {
-            panic!(
-                "Attempt to split non-free block: {:x}",
-                self as *const Block as usize
-            );
+            panic!("Attempt to split non-free block: {:p}", self.as_ptr());
         }
 
         let old_size = self.get_size();
 
         // make sure the block is large enough
-        if old_size < 32 {
+        if old_size < 2 * BLOCK_ALIGN {
             panic!(
-                "Block is to small to split: {:x}",
-                self as *const Block as usize
+                "Block at {:p} is to small to split, desired {}",
+                self.as_ptr(),
+                size
             );
         }
 
         if old_size < size + BLOCK_ALIGN {
             panic!(
-                "Block is to small to split at {}: {:x}",
-                size, self as *const Block as usize
+                "Block at {:p} is to small to split, desired: {} ",
+                self.as_ptr(),
+                size,
             );
         }
 
         let new_block_size = old_size - size;
 
         // make this block smaller
-        let new_data = unsafe { slice::from_raw_parts_mut(self.as_mut_ptr() as *mut usize, size) };
+        // NOTE: this is a `usize` array, so divide length by words size!
+        let new_data =
+            unsafe { slice::from_raw_parts_mut(self.as_mut_ptr() as *mut usize, size / WORD_SIZE) };
         let old_data = mem::replace(&mut self.data, new_data);
         mem::forget(old_data);
         self.set_size(size);
