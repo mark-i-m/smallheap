@@ -55,17 +55,9 @@
 #[cfg(not(feature = "no_std"))]
 extern crate core;
 
-use core::{ptr, slice, mem::{self, size_of}};
+use core::{slice, mem::{self, size_of}, ptr::{self, NonNull}};
 
 // A couple of constants
-
-/// A flag to turn on and off debugging output
-#[cfg(feature = "debug")]
-const DEBUG: bool = true;
-
-/// A flag to turn on and off debugging output
-#[cfg(not(feature = "debug"))]
-const DEBUG: bool = false;
 
 /// The size of a word (convenience)
 const WORD_SIZE: usize = size_of::<usize>();
@@ -90,6 +82,20 @@ fn round_to_n(size: usize, n: usize) -> usize {
 }
 
 // The allocator implementation...
+
+/// Various errors the heap may return for operations.
+#[derive(Clone, Copy, Debug)]
+pub enum AllocErr {
+    /// Returned by `malloc` when there is not enough memory to satisfy the allocation.
+    OutOfMemory,
+
+    /// Returned by operations that encounter a heap corruption. This indicates that someone has a
+    /// pointer bug.
+    Corrupted,
+
+    /// Returned by operations when given invalid arguments.
+    Invalid,
+}
 
 /// The heap implementation itself.
 pub struct Allocator {
@@ -118,6 +124,10 @@ pub struct Allocator {
 
 impl Allocator {
     /// Create a new heap starting at address `start` with the given `size` in bytes.
+    ///
+    /// # Panics
+    ///
+    /// If the given arguments don't leave enough room for at least one block.
     pub unsafe fn new(start: *mut u8, size: usize) -> Self {
         #[cfg(feature = "debug")]
         println!("heap::new({:p}, {})", start, size);
@@ -162,45 +172,26 @@ impl Allocator {
         }
     }
 
-    /// Return a pointer to `size` bytes of memory aligned to `align`.
+    /// Return a pointer to `size` bytes of memory aligned to `align` or an error.
     ///
-    /// On failure, return a null pointer.
-    ///
-    /// Behavior is undefined if the requested size is 0 or the alignment is not a
-    /// power of 2. The alignment must be no larger than the largest supported page
-    /// size on the platform.
-    pub unsafe fn malloc(&mut self, size: usize, align: usize) -> *mut u8 {
-        if DEBUG {
-            #[cfg(feature = "debug")]
-            println!("malloc {}, {} -> ", size, align);
-        }
+    /// Returns `AllocErr::Invalid` when `size == 0` or `align` is not a power of two.
+    pub unsafe fn malloc(&mut self, size: usize, align: usize) -> Result<NonNull<u8>, AllocErr> {
+        #[cfg(feature = "debug")]
+        println!("malloc {}, {} -> ", size, align);
 
-        if size == 0 {
-            return 0 as *mut u8;
+        if size == 0 || !align.is_power_of_two() {
+            return Err(AllocErr::Invalid);
         }
 
         let size = round_to_block_align(size);
-        let align = align.next_power_of_two();
 
         // get a free block
         let (mut begin, split_size) = if let Some(block) = self.find_block(size, align) {
             block
         } else {
-            if self.free_list.is_none() {
-                panic!("Out of memory!");
-            } else {
-                // NOTE: fail for now because rustc does not know how to handle failed mallocs
-                // TODO: is this still true?
-                panic!(
-                    "malloc({}, {}) -> *** malloc failed, rustc cannot handle this :( ***\n",
-                    size, align
-                );
-            }
-
-            // update stats
-            // self.fail_mallocs += 1;
-
-            // return 0 as *mut u8;
+            // If we get here, it means we tried to coalesce blocks and failed
+            self.fail_mallocs += 1;
+            return Err(AllocErr::OutOfMemory);
         };
 
         // split block if needed
@@ -230,12 +221,10 @@ impl Allocator {
         // update stats
         self.success_mallocs += 1;
 
-        if DEBUG {
-            #[cfg(feature = "debug")]
-            println!("0x{:p}\n", begin.as_mut_ptr());
-        }
+        #[cfg(feature = "debug")]
+        println!("0x{:p}\n", begin.as_mut_ptr());
 
-        begin.as_mut_ptr()
+        Ok(NonNull::new(begin.as_mut_ptr()).unwrap())
     }
 
     /// Deallocates the memory referenced by `ptr`.
@@ -246,10 +235,8 @@ impl Allocator {
     /// create the allocation referenced by `ptr`. The `old_size` parameter may be
     /// any value in range_inclusive(requested_size, usable_size).
     pub unsafe fn free(&mut self, ptr: *mut u8, old_size: usize) {
-        if DEBUG {
-            #[cfg(feature = "debug")]
-            println!("free 0x{:p}, {}\n", ptr, old_size);
-        }
+        #[cfg(feature = "debug")]
+        println!("free 0x{:p}, {}\n", ptr, old_size);
 
         // check input
         if ptr == ptr::null_mut() {
@@ -282,7 +269,6 @@ impl Allocator {
 
     /// Return the number of bytes of this heap.
     pub fn size(&self) -> usize {
-        println!("size: {:x} {:x}", self.start, self.end);
         self.end - self.start
     }
 

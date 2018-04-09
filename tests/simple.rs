@@ -14,7 +14,7 @@ fn test_simple_alloc_free() {
 
     assert_eq!(h.free_bytes(), h.size());
 
-    let x = unsafe { h.malloc(max, 0) };
+    let x = unsafe { h.malloc(max, 1).unwrap().as_ptr() };
 
     assert_eq!(h.free_bytes(), 0);
 
@@ -35,7 +35,7 @@ fn test_simple_alloc_free_alot() {
     assert_eq!(h.free_bytes(), h.size());
 
     for _ in 0..10000 {
-        let x = unsafe { h.malloc(32, 0) };
+        let x = unsafe { h.malloc(32, 1).unwrap().as_ptr() };
         unsafe {
             h.free(x, 32);
         }
@@ -55,7 +55,7 @@ fn test_mem_leak_safe() {
 
     // we should be able to just do a bunch of mallocs safely
     for i in 0..120 {
-        let x = unsafe { h.malloc(32, 0) };
+        let x = unsafe { h.malloc(32, 1).unwrap().as_ptr() };
         assert!(!x.is_null());
         assert!(x >= mem.as_mut_ptr());
         assert!(x < unsafe { mem.as_mut_ptr().offset(SIZE as isize) });
@@ -75,7 +75,7 @@ fn test_pattern_out_of_bounds() {
     let mut ptrs = HashSet::new();
 
     for _ in 0..120 {
-        let x = unsafe { h.malloc(32, 0) };
+        let x = unsafe { h.malloc(32, 1).unwrap().as_ptr() };
         ptrs.insert(x);
     }
 
@@ -104,7 +104,7 @@ fn test_simple_alloc_free_simple_pattern() {
     let mut ptrs = HashSet::new();
 
     for _ in 0..120 {
-        let x = unsafe { h.malloc(32, 0) };
+        let x = unsafe { h.malloc(32, 1).unwrap().as_ptr() };
         ptrs.insert(x);
     }
 
