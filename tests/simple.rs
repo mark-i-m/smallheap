@@ -1,6 +1,7 @@
 extern crate smallheap;
 
 use std::collections::HashSet;
+use std::ptr;
 
 use smallheap::Allocator;
 
@@ -111,6 +112,34 @@ fn test_simple_alloc_free_simple_pattern() {
     for x in ptrs.drain() {
         unsafe {
             h.free(x, 32);
+        }
+    }
+
+    assert_eq!(h.free_bytes(), h.size());
+}
+
+#[test]
+fn test_simple_alloc_free_simple_dirty() {
+    const SIZE: usize = 1 << 12;
+    let mut mem = [0u8; SIZE];
+
+    let mut h = unsafe { Allocator::new(mem.as_mut_ptr(), SIZE) };
+    let max = h.free_bytes();
+
+    assert_eq!(h.free_bytes(), h.size());
+
+    for i in 0..max {
+        let size = max - i;
+
+        let x = unsafe { h.malloc(size, 1).unwrap().as_ptr() };
+
+        unsafe {
+            // write values into the blocks to make sure that the allocator is not accidentally doing
+            // something with them
+            ptr::write_bytes(x, 0xFF, size);
+
+            // then free
+            h.free(x, size);
         }
     }
 

@@ -7,6 +7,7 @@
 //! - O(1) space overhead. Really, it is at most a few dozen bytes. There is exactly 0 space
 //!   overhead per allocation, though.
 //! - `no_std` compatible. Use the `no_std` feature in your `Cargo.toml`.
+//! - Works on _stable_ rust!
 //!
 //! ### Caveats
 //!
@@ -250,11 +251,6 @@ impl Allocator {
 
         // update heap metadata
         self.free_bytes += old_size;
-
-        // sanity
-        if block.is_free() {
-            panic!("Double free: {:p}", ptr);
-        }
 
         // Create block and insert into free list
         block.set_size(old_size);
