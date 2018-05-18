@@ -145,3 +145,41 @@ fn test_simple_alloc_free_simple_dirty() {
 
     assert_eq!(h.free_bytes(), h.size());
 }
+
+// extend the heap and allocate all memory, then free
+#[test]
+fn test_extend_pattern_out_of_bounds() {
+    const SIZE: usize = 1 << 12;
+    let mut mem = [0u8; SIZE * 2];
+    let mut mem2 = [0u8; SIZE * 2];
+
+    let mut h = unsafe { Allocator::new(mem[SIZE / 2..].as_mut_ptr(), SIZE) };
+
+    assert_eq!(h.free_bytes(), h.size());
+
+    // extend
+    unsafe { h.extend(mem2[SIZE / 2..].as_mut_ptr(), SIZE) };
+
+    assert_eq!(h.free_bytes(), h.size());
+
+    let mut ptrs = HashSet::new();
+
+    for _ in 0..240 {
+        let x = unsafe { h.malloc(32, 1).unwrap().as_ptr() };
+        ptrs.insert(x);
+    }
+
+    for x in ptrs.drain() {
+        unsafe {
+            h.free(x, 32);
+        }
+    }
+
+    assert_eq!(h.free_bytes(), h.size());
+
+    // make sure we don't touch any bytes outside the heap
+    assert!(mem[0..SIZE / 2].iter().all(|x| x == &0));
+    assert!(mem[SIZE + SIZE / 2..].iter().all(|x| x == &0));
+    assert!(mem2[0..SIZE / 2].iter().all(|x| x == &0));
+    assert!(mem2[SIZE + SIZE / 2..].iter().all(|x| x == &0));
+}
