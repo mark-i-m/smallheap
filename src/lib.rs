@@ -56,7 +56,9 @@
 #[cfg(not(feature = "no_std"))]
 extern crate core;
 
-use core::{slice, mem::{self, size_of}, ptr::{self, NonNull}};
+use core::{
+    mem::{self, size_of}, ptr::{self, NonNull}, slice,
+};
 
 // A couple of constants
 
@@ -100,11 +102,14 @@ pub enum AllocErr {
 
 /// The heap implementation itself.
 pub struct Allocator {
-    /// The start address of the heap
+    /// Keep track of the latest addition to the heap for debugging and testing purposes
     start: usize,
 
-    /// The end address of the heap. That is, the first address that is not in the heap.
+    /// Keep track of the latest addition to the heap for debugging and testing purposes
     end: usize,
+
+    /// The number of bytes in this heap total
+    size: usize,
 
     /// The first block of the heap
     free_list: Option<Block>,
@@ -165,6 +170,7 @@ impl Allocator {
         Allocator {
             start,
             end,
+            size: end - start,
             free_list: Some(first),
             free_bytes: end - start,
             success_mallocs: 0,
@@ -265,12 +271,42 @@ impl Allocator {
 
     /// Return the number of bytes of this heap.
     pub fn size(&self) -> usize {
-        self.end - self.start
+        self.size
     }
 
     /// Return the number of free bytes of this heap.
     pub fn free_bytes(&self) -> usize {
         self.free_bytes
+    }
+
+    /// Extend the heap with the given region of memory.
+    pub unsafe fn extend(&mut self, start: *mut u8, size: usize) {
+        #[cfg(feature = "debug")]
+        println!("heap::extend({:p}, {})", start, size);
+
+        // Block align the beginning
+        let original_start = start as usize;
+        let start = round_to_block_align(original_start);
+
+        // round end down
+        let end = (original_start + size) & !(BLOCK_ALIGN - 1);
+
+        // bounds check
+        if end <= start {
+            panic!("No heap space");
+        }
+
+        assert!((end - start) % BLOCK_ALIGN == 0);
+
+        // "Free" the new region as if it was a large allocated block
+        self.free(start as *mut u8, end - start);
+
+        // Update size
+        self.size += end - start;
+
+        // Update start and end for debugging and testing
+        self.start = start;
+        self.end = end;
     }
 
     /// Find a block with the right size and alignment. Remove the block from the free list and
@@ -751,7 +787,7 @@ mod test {
     macro_rules! new_block_aligned {
         ($size:expr) => {
             [BlockAligned([0; 4]); $size / BLOCK_ALIGN]
-        }
+        };
     }
 
     #[test]
@@ -807,6 +843,36 @@ mod test {
         assert_eq!(h.start, actual_start);
         assert_eq!(h.end, actual_end);
         assert_eq!(h.size(), actual_end - actual_start);
+        assert_eq!(h.free_bytes(), h.size());
+    }
+
+    #[test]
+    fn test_extend() {
+        const SIZE: usize = 1 << 12;
+        let mut mem = new_block_aligned!(SIZE);
+        let mut mem2 = new_block_aligned!(SIZE);
+
+        assert_eq!(SIZE, mem.len() * mem::size_of::<BlockAligned>());
+        assert_eq!(SIZE, mem2.len() * mem::size_of::<BlockAligned>());
+
+        let mut h = unsafe { Allocator::new(mem.as_mut_ptr() as *mut u8, SIZE) };
+
+        // make sure we don't consume more space than we are given
+        assert!(h.start >= (mem.as_mut_ptr() as usize));
+        assert!(h.end <= unsafe { (mem.as_mut_ptr().offset(SIZE as isize) as usize) });
+
+        // make sure we are not wasting too much space
+        assert_eq!(h.size(), SIZE);
+        assert_eq!(h.free_bytes(), h.size());
+
+        // extend and check again
+        unsafe { h.extend(mem2.as_mut_ptr() as *mut u8, SIZE) };
+
+        assert!(h.start >= (mem2.as_mut_ptr() as usize));
+        assert!(h.end <= unsafe { (mem2.as_mut_ptr().offset(SIZE as isize) as usize) });
+
+        // make sure we are not wasting too much space
+        assert_eq!(h.size(), 2 * SIZE);
         assert_eq!(h.free_bytes(), h.size());
     }
 }
